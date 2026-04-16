@@ -196,7 +196,11 @@ globalEnvs:
 globalEnvsSecondary: []
 
 # A tertiary source for env variables (eg: used for a specific env (eg: dev, or staging))
-extraEnvs: []
+extraEnvs:
+  - name: MQTT_BROKER_URI
+    value: "tcp://iot-agent-mqtt-broker.iotag-dev.svc.cluster.local:1883"
+  - name: JWT_SECRET
+    value: "supersecretkey"
 
 # stdin and tty status
 tty: false
