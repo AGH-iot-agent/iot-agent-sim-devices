@@ -4,7 +4,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
@@ -40,8 +43,9 @@ public class MqttTelemetryService {
     private final Map<String, Double> tempPhase = new ConcurrentHashMap<>();
     private final Map<String, Integer> batteryByDevice = new ConcurrentHashMap<>();
     private final AtomicLong publishedSamples = new AtomicLong();
+    private final ScheduledExecutorService mqttReconnectExecutor = Executors.newSingleThreadScheduledExecutor();
 
-    private MqttClient mqttClient;
+    private volatile MqttClient mqttClient;
 
     public MqttTelemetryService(DeviceSimulationService deviceSimulationService,
                                 SimulatorProperties simulatorProperties,
@@ -53,11 +57,12 @@ public class MqttTelemetryService {
 
     @PostConstruct
     public void init() {
-        connectClient();
+        scheduleConnect(0);
     }
 
     @PreDestroy
     public void shutdown() {
+        mqttReconnectExecutor.shutdownNow();
         if (mqttClient == null) {
             return;
         }
@@ -71,7 +76,10 @@ public class MqttTelemetryService {
 
     @Scheduled(fixedDelayString = "${simulator.publish-interval-ms:5000}")
     public void publishTelemetry() {
-        ensureConnected();
+        if (mqttClient == null || !mqttClient.isConnected()) {
+            LOGGER.warn("sim.mqtt.not-connected — skipping publish cycle, reconnect scheduled");
+            return;
+        }
 
         List<DeviceProfile> devices = deviceSimulationService.getActiveDevices();
         if (devices.isEmpty()) {
@@ -104,18 +112,30 @@ public class MqttTelemetryService {
         LOGGER.info("sim.cycle devices={} totalPublished={}", devices.size(), publishedSamples.get());
     }
 
+    private void scheduleConnect(long delaySeconds) {
+        mqttReconnectExecutor.schedule(this::connectClient, delaySeconds, TimeUnit.SECONDS);
+    }
+
     private void connectClient() {
+        if (mqttClient != null && mqttClient.isConnected()) {
+            return;
+        }
         try {
+            if (mqttClient != null) {
+                try { mqttClient.close(); } catch (MqttException ignored) { }
+            }
             mqttClient = new MqttClient(simulatorProperties.getMqttBrokerUri(), MqttClient.generateClientId());
             MqttConnectOptions options = new MqttConnectOptions();
             options.setAutomaticReconnect(true);
             options.setCleanSession(true);
+            options.setConnectionTimeout(10);
             mqttClient.connect(options);
             LOGGER.info("sim.mqtt.connected broker={}", simulatorProperties.getMqttBrokerUri());
             mqttClient.setCallback(new MqttCallback() {
                 @Override
                 public void connectionLost(Throwable cause) {
                     LOGGER.warn("MQTT connection lost: {}", cause != null ? cause.getMessage() : "unknown");
+                    scheduleConnect(15);
                 }
 
                 @Override
@@ -131,15 +151,10 @@ public class MqttTelemetryService {
             mqttClient.subscribe("devices/+/command", 1);
             LOGGER.info("sim.mqtt.subscribed topic=devices/+/command");
         } catch (MqttException exception) {
-            throw new IllegalStateException("Unable to connect simulator to MQTT broker", exception);
+            LOGGER.warn("sim.mqtt.connect.failed broker={} reason={} — retrying in 15s",
+                simulatorProperties.getMqttBrokerUri(), exception.getMessage());
+            scheduleConnect(15);
         }
-    }
-
-    private void ensureConnected() {
-        if (mqttClient != null && mqttClient.isConnected()) {
-            return;
-        }
-        connectClient();
     }
 
     private TelemetrySample buildSample(DeviceProfile device, long timestamp) {
