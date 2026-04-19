@@ -9,7 +9,7 @@ simulator:
   target-base-url: ${SIMULATOR_TARGET_BASE_URL:http://iot-agent-device-api:8080}
   default-count: ${SIMULATOR_DEFAULT_COUNT:5}
   device-prefix: ${SIMULATOR_DEVICE_PREFIX:sim}
-  publish-interval-ms: ${SIMULATOR_PUBLISH_INTERVAL_MS:5000}
+  publish-interval-ms: ${SIMULATOR_PUBLISH_INTERVAL_MS:20000}
   mqtt-broker-uri: ${MQTT_BROKER_URI:tcp://iot-agent-mqtt-broker:1883}
   mixed-mode-enabled: ${SIMULATOR_MIXED_MODE_ENABLED:true}
   auto-register:
