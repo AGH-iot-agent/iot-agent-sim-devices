@@ -2,6 +2,8 @@
 
 # REQUIRED for you to set a value here, name of your service
 name: "iot-agent-sim-devices"
+labels:
+  service_name: "iot-agent-sim-devices"
 
 # Number of pods in deployment, default of not highly available (override on HA environments)
 replicaCount: 1
